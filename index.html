@@ -160,10 +160,17 @@
         };
 
         // ============================================
-        // TỰ ĐỘNG ĐỌC FILE JSON TỪ CÙNG THƯ MỤC
+        // LOAD JSON TỪ GITHUB RELEASE (Khuyến nghị)
         // ============================================
-        const JSON_FILE_PATH = 'do_tuan_tree_data.json'; // Tên file JSON của bạn
-        // Đặt file JSON cùng thư mục với file HTML này
+        // Sau khi tạo Release và upload file, điền link vào đây:
+        // Dạng: https://github.com/USERNAME/REPO/releases/download/v1.0/do_tuan_tree_data.json
+        
+        const GITHUB_RELEASE_URL = 'https://github.com/dotuan68/xmas-for-iemnam/releases/download/v1.0/do_tuan_tree_data.json';
+        
+        // Nếu chưa có GitHub Release, dùng local file:
+        const JSON_FILE_PATH = GITHUB_RELEASE_URL === 'YOUR_GITHUB_RELEASE_LINK_HERE' 
+            ? 'do_tuan_tree_data.json' 
+            : GITHUB_RELEASE_URL;
         // ============================================
 
         let scene, camera, renderer, composer, clock = new THREE.Clock();
@@ -805,18 +812,47 @@
         }
 
         async function loadJSONFile() {
+            console.log('Đang tải dữ liệu từ:', JSON_FILE_PATH);
+            
             try {
-                const response = await fetch(JSON_FILE_PATH);
+                const response = await fetch(JSON_FILE_PATH, {
+                    method: 'GET',
+                    cache: 'default'
+                });
+                
                 if (!response.ok) {
-                    console.warn('Không tìm thấy file JSON, sử dụng dữ liệu mặc định');
+                    console.error('Lỗi tải file:', response.status, response.statusText);
+                    console.warn('Không tìm thấy file JSON');
                     return;
                 }
+                
+                console.log('Đang đọc dữ liệu...');
+                const jsonText = await response.text();
+                const sizeMB = (jsonText.length / 1024 / 1024).toFixed(2);
+                console.log(`✓ Đã tải ${sizeMB} MB dữ liệu`);
+                
+                setTimeout(() => {
+                    console.log('Đang import dữ liệu vào scene...');
+                    importSceneData(jsonText);
+                    console.log('✓ Hoàn tất!');
+                }, 500);
+            } catch (error) {
+                console.error('Lỗi khi load JSON:', error);
+                console.warn('Kiểm tra: 1) Link GitHub Release đúng chưa? 2) File có tồn tại không?');
+            }
+        }
+        
+        async function loadLocalJSON() {
+            try {
+                const response = await fetch('do_tuan_tree_data.json');
+                if (!response.ok) return;
                 const jsonText = await response.text();
                 setTimeout(() => {
                     importSceneData(jsonText);
+                    console.log('✓ Đã load dữ liệu local!');
                 }, 500);
             } catch (error) {
-                console.warn('Không thể load file JSON:', error);
+                console.warn('Không có file JSON, sử dụng scene trống');
             }
         }
 
