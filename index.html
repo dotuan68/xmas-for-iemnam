@@ -160,17 +160,14 @@
         };
 
         // ============================================
-        // LOAD JSON TỪ GITHUB RELEASE (Khuyến nghị)
+        // LOAD JSON TỪ jsDelivr CDN - CHUNKED VERSION
         // ============================================
-        // Sau khi tạo Release và upload file, điền link vào đây:
-        // Dạng: https://github.com/USERNAME/REPO/releases/download/v1.0/do_tuan_tree_data.json
+        // Load manifest và các chunk riêng biệt để tránh giới hạn file size
         
-        const GITHUB_RELEASE_URL = 'https://github.com/dotuan68/xmas-for-iemnam/releases/download/v1.0/do_tuan_tree_data.json';
+        const CDN_BASE = 'https://cdn.jsdelivr.net/gh/dotuan68/xmas-for-iemnam@main';
+        const MANIFEST_URL = `${CDN_BASE}/data/manifest.json`;
         
-        // Nếu chưa có GitHub Release, dùng local file:
-        const JSON_FILE_PATH = GITHUB_RELEASE_URL === 'YOUR_GITHUB_RELEASE_LINK_HERE' 
-            ? 'do_tuan_tree_data.json' 
-            : GITHUB_RELEASE_URL;
+        const JSON_FILE_PATH = MANIFEST_URL;
         // ============================================
 
         let scene, camera, renderer, composer, clock = new THREE.Clock();
@@ -812,33 +809,58 @@
         }
 
         async function loadJSONFile() {
-            console.log('Đang tải dữ liệu từ:', JSON_FILE_PATH);
+            console.log('Đang tải manifest từ:', JSON_FILE_PATH);
             
             try {
-                const response = await fetch(JSON_FILE_PATH, {
-                    method: 'GET',
-                    cache: 'default'
-                });
-                
-                if (!response.ok) {
-                    console.error('Lỗi tải file:', response.status, response.statusText);
-                    console.warn('Không tìm thấy file JSON');
+                // Load manifest
+                const manifestResponse = await fetch(JSON_FILE_PATH);
+                if (!manifestResponse.ok) {
+                    console.error('Lỗi tải manifest:', manifestResponse.status);
                     return;
                 }
                 
-                console.log('Đang đọc dữ liệu...');
-                const jsonText = await response.text();
-                const sizeMB = (jsonText.length / 1024 / 1024).toFixed(2);
-                console.log(`✓ Đã tải ${sizeMB} MB dữ liệu`);
+                const manifest = await manifestResponse.json();
+                console.log(`✓ Manifest: ${manifest.total_chunks} chunks`);
                 
+                // Tạo data tổng hợp
+                const fullData = {
+                    owner: manifest.owner,
+                    music: manifest.music,
+                    letter: manifest.letter,
+                    theme: manifest.theme,
+                    photos: []
+                };
+                
+                // Load tất cả chunks song song
+                console.log('Đang tải các chunks...');
+                const chunkPromises = manifest.chunk_files.map(async (chunkFile, index) => {
+                    const chunkUrl = `${CDN_BASE}/${chunkFile}`;
+                    const response = await fetch(chunkUrl);
+                    if (!response.ok) throw new Error(`Failed to load ${chunkFile}`);
+                    const chunkData = await response.json();
+                    console.log(`✓ Chunk ${index + 1}/${manifest.total_chunks}`);
+                    return chunkData.photos;
+                });
+                
+                const allChunks = await Promise.all(chunkPromises);
+                
+                // Merge tất cả photos
+                allChunks.forEach(photos => {
+                    fullData.photos.push(...photos);
+                });
+                
+                console.log(`✓ Đã tải ${fullData.photos.length} ảnh`);
+                
+                // Import vào scene
                 setTimeout(() => {
                     console.log('Đang import dữ liệu vào scene...');
-                    importSceneData(jsonText);
+                    importSceneData(JSON.stringify(fullData));
                     console.log('✓ Hoàn tất!');
                 }, 500);
+                
             } catch (error) {
                 console.error('Lỗi khi load JSON:', error);
-                console.warn('Kiểm tra: 1) Link GitHub Release đúng chưa? 2) File có tồn tại không?');
+                console.warn('Kiểm tra: 1) Files đã được upload chưa? 2) CDN đã cache chưa?');
             }
         }
         
