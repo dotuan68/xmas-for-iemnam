@@ -77,14 +77,14 @@
 
     <div id="ui-layer">
         <div id="top-right-controls">
-            <div class="control-col" id="col-media">
+            <div class="control-col" id="col-media" style="display: none;">
                 <button id="btn-bg-music" class="control-btn">Tải nhạc</button>
                 <button id="btn-add-photo" class="control-btn">Tải ảnh</button>
                 <button id="btn-write-letter" class="control-btn">Tâm thư</button>
             </div>
             <div class="control-col" id="col-system">
-                <button id="btn-import" class="control-btn">Nhập file</button>
-                <button id="btn-export" class="control-btn">Xuất file</button>
+                <button id="btn-import" class="control-btn" style="display: none;">Nhập file</button>
+                <button id="btn-export" class="control-btn" style="display: none;">Xuất file</button>
                 <button id="btn-fullscreen" class="control-btn">Toàn màn hình</button>
             </div>
         </div>
@@ -160,12 +160,13 @@
         };
 
         // ============================================
-        // LOAD JSON TỪ jsDelivr CDN - CHUNKED VERSION
+        // LOAD JSON - CHUNKED VERSION
         // ============================================
-        // Load manifest và các chunk riêng biệt để tránh giới hạn file size
+        // Load từ local trước, nếu không có thì fallback sang CDN
         
-        const CDN_BASE = 'https://cdn.jsdelivr.net/gh/dotuan68/xmas-for-iemnam@main';
-        const MANIFEST_URL = `${CDN_BASE}/data/manifest.json`;
+        const LOCAL_BASE = './data';
+        const CDN_BASE = 'https://cdn.jsdelivr.net/gh/dotuan68/xmas-for-iemnam@main/data';
+        const MANIFEST_URL = `${LOCAL_BASE}/manifest.json`;
         
         const JSON_FILE_PATH = MANIFEST_URL;
         // ============================================
@@ -854,11 +855,18 @@
             console.log('Đang tải manifest từ:', JSON_FILE_PATH);
             
             try {
-                // Load manifest
+                // Load manifest từ local
                 const manifestResponse = await fetch(JSON_FILE_PATH);
                 if (!manifestResponse.ok) {
-                    console.warn('CDN chưa sẵn sàng, thử load local...');
-                    await loadLocalJSON();
+                    console.warn('Không tìm thấy data local, thử CDN...');
+                    // Fallback sang CDN
+                    const cdnManifestUrl = `${CDN_BASE}/manifest.json`;
+                    const cdnResponse = await fetch(cdnManifestUrl);
+                    if (!cdnResponse.ok) {
+                        console.error('Cả local và CDN đều không khả dụng');
+                        return;
+                    }
+                    await loadFromCDN(cdnResponse);
                     return;
                 }
                 
@@ -874,10 +882,10 @@
                     photos: []
                 };
                 
-                // Load tất cả chunks song song
+                // Load tất cả chunks song song từ LOCAL
                 console.log('Đang tải các chunks...');
                 const chunkPromises = manifest.chunk_files.map(async (chunkFile, index) => {
-                    const chunkUrl = `${CDN_BASE}/${chunkFile}`;
+                    const chunkUrl = `${LOCAL_BASE}/${chunkFile.replace('data/', '')}`;
                     const response = await fetch(chunkUrl);
                     if (!response.ok) throw new Error(`Failed to load ${chunkFile}`);
                     const chunkData = await response.json();
@@ -903,8 +911,38 @@
                 
             } catch (error) {
                 console.error('Lỗi khi load JSON:', error);
-                console.warn('Kiểm tra: 1) Files đã được upload chưa? 2) CDN đã cache chưa?');
             }
+        }
+        
+        async function loadFromCDN(manifestResponse) {
+            const manifest = await manifestResponse.json();
+            console.log(`✓ CDN Manifest: ${manifest.total_chunks} chunks`);
+            
+            const fullData = {
+                owner: manifest.owner,
+                music: manifest.music,
+                letter: manifest.letter,
+                theme: manifest.theme,
+                photos: []
+            };
+            
+            const chunkPromises = manifest.chunk_files.map(async (chunkFile, index) => {
+                const chunkUrl = `${CDN_BASE}/${chunkFile.replace('data/', '')}`;
+                const response = await fetch(chunkUrl);
+                if (!response.ok) throw new Error(`Failed to load ${chunkFile}`);
+                const chunkData = await response.json();
+                console.log(`✓ CDN Chunk ${index + 1}/${manifest.total_chunks}`);
+                return chunkData.photos;
+            });
+            
+            const allChunks = await Promise.all(chunkPromises);
+            allChunks.forEach(photos => fullData.photos.push(...photos));
+            
+            console.log(`✓ Đã tải ${fullData.photos.length} ảnh từ CDN`);
+            setTimeout(() => {
+                importSceneData(JSON.stringify(fullData));
+                console.log('✓ Hoàn tất!');
+            }, 500);
         }
         
         async function loadLocalJSON() {
