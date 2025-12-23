@@ -177,6 +177,7 @@
 
         let handLandmarker, video, drawingUtils, canvasCtx;
         let caneTexture, snowTexture, matLib = {};
+        let animationId = null; // Để có thể cancel animation khi context loss
         
         const _tempVec = new THREE.Vector3();
         const _targetVec = new THREE.Vector3();
@@ -217,12 +218,39 @@
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
             camera.position.set(0, 0, CONFIG.camera.z); 
 
-            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance", depth: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-            renderer.toneMapping = THREE.ACESFilmicToneMapping; 
-            renderer.toneMappingExposure = 1.0; 
-            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            // Xử lý lỗi WebGL context
+            try {
+                renderer = new THREE.WebGLRenderer({ 
+                    antialias: false, 
+                    powerPreference: "high-performance", 
+                    depth: true,
+                    failIfMajorPerformanceCaveat: false // Cho phép chạy ngay cả khi performance thấp
+                });
+                
+                // Xử lý context loss/restore
+                renderer.domElement.addEventListener('webglcontextlost', (e) => {
+                    e.preventDefault();
+                    console.warn('WebGL context lost. Attempting to restore...');
+                    cancelAnimationFrame(animationId);
+                }, false);
+                
+                renderer.domElement.addEventListener('webglcontextrestored', () => {
+                    console.log('WebGL context restored!');
+                    initThree();
+                    animate();
+                }, false);
+                
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+                renderer.toneMapping = THREE.ACESFilmicToneMapping; 
+                renderer.toneMappingExposure = 1.0; 
+                document.getElementById('canvas-container').appendChild(renderer.domElement);
+                
+            } catch(error) {
+                console.error('Không thể khởi tạo WebGL:', error);
+                document.getElementById('loader').innerHTML = '<div style="color: #d4af37; text-align: center; padding: 20px;">⚠️ Lỗi khởi tạo đồ họa<br><small>Vui lòng tải lại trang hoặc thử trình duyệt khác</small></div>';
+                return;
+            }
 
             bgGroup = new THREE.Group(); scene.add(bgGroup);
             mainGroup = new THREE.Group(); mainGroup.rotation.x = 0.1; scene.add(mainGroup);
@@ -653,8 +681,22 @@
         function createStarTopper() {
             const star = new THREE.Mesh(new THREE.OctahedronGeometry(2.0, 0), matLib.starGold);
             star.position.set(0, CONFIG.particles.treeHeight/2 + 1.5, 0);
+            
+            // Tạo glow texture bằng canvas
+            const glowCanvas = document.createElement('canvas');
+            glowCanvas.width = 128; glowCanvas.height = 128;
+            const glowCtx = glowCanvas.getContext('2d');
+            const glowGrad = glowCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+            glowGrad.addColorStop(0, 'rgba(255,255,255,1)');
+            glowGrad.addColorStop(0.3, 'rgba(255,255,255,0.8)');
+            glowGrad.addColorStop(0.6, 'rgba(255,255,255,0.3)');
+            glowGrad.addColorStop(1, 'rgba(255,255,255,0)');
+            glowCtx.fillStyle = glowGrad;
+            glowCtx.fillRect(0, 0, 128, 128);
+            const glowTexture = new THREE.CanvasTexture(glowCanvas);
+            
             const halo = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshBasicMaterial({ 
-                map: new THREE.TextureLoader().load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/sprites/glow.png'), 
+                map: glowTexture, 
                 blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.7, color: 0xffdd00 
             }));
             star.add(halo); starGroup.add(star);
@@ -815,7 +857,8 @@
                 // Load manifest
                 const manifestResponse = await fetch(JSON_FILE_PATH);
                 if (!manifestResponse.ok) {
-                    console.error('Lỗi tải manifest:', manifestResponse.status);
+                    console.warn('CDN chưa sẵn sàng, thử load local...');
+                    await loadLocalJSON();
                     return;
                 }
                 
@@ -1003,7 +1046,7 @@
         }
 
         function animate() {
-            requestAnimationFrame(animate);
+            animationId = requestAnimationFrame(animate);
             const dt = clock.getDelta(); STATE.time = clock.elapsedTime;
             const inputX = STATE.hand.detected ? STATE.hand.x : 0; 
 
